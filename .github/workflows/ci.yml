@@ -1,0 +1,166 @@
+#
+#              Copyright (c) 2025 Gennaro Prota
+#
+# Distributed under the Boost Software License, Version 1.0.
+#    (See accompanying file LICENSE_1_0.txt or copy at
+#          https://www.boost.org/LICENSE_1_0.txt)
+#
+# Official repository: https://github.com/cppalliance/handlebars
+#
+
+name: Continuous integration
+
+on:
+  push:
+    branches: [master, develop, '*']
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [master, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    name: Generate test matrix
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.cpp-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate test matrix
+        id: cpp-matrix
+        uses: alandefreitas/cpp-actions/cpp-matrix@v1.9.0
+        with:
+          compilers: |
+            gcc >=15
+            clang >=19
+            msvc >=14.40
+            apple-clang *
+          standards: '23'
+          build-types: |
+            gcc: Release
+            gcc Coverage: Release
+            clang: Release
+            apple-clang: Release
+            msvc: RelWithDebInfo
+            msvc Optimized-Debug: Debug
+          ccflags: |
+            msvc Optimized-Debug: /Ob1 /O2 /Zi
+          cxxflags: |
+            msvc Optimized-Debug: /Ob1 /O2 /Zi
+          containers: |
+            clang: ubuntu:24.04
+          runs-on: |
+            msvc: windows-2022
+            clang: ubuntu-24.04
+            apple-clang: macos-15
+          install: |
+            gcc: git build-essential libc++-dev libc++abi-dev pkg-config ninja-build curl zip unzip tar
+            clang: git build-essential libc++-dev libc++abi-dev pkg-config ninja-build curl zip unzip tar g++-14=14.2.0-4ubuntu2~24.04 clang libclang-dev libclang-cpp-dev libc++-dev libc++abi-dev libc6-dev
+          extra-values: |
+            use-libcxx: {{#if (ieq compiler 'clang')}}true{{else}}false{{/if}}
+            libcxx-runtimes: libcxx{{#if (ne compiler 'msvc')}};libcxxabi{{/if}}
+            warning-flags: {{#if (eq compiler 'msvc') }}/WX /W4 {{else}}-Werror -Wall {{/if}}
+            common-flags-base: {{#if (ieq compiler 'clang')}}-m64 -pthread {{/if}}
+            common-flags: {{{ common-flags-base }}}{{#if msan }}-fsanitize-memory-track-origins {{/if}}
+            common-ccflags: {{{ ccflags }}} {{{ common-flags }}}
+          output-file: matrix.json
+
+  build:
+    name: ${{ matrix.name }}
+    needs: matrix
+    runs-on: ${{ matrix.runs-on }}
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup C++
+        id: setup-cpp
+        uses: alandefreitas/cpp-actions/setup-cpp@v1.9.0
+        with:
+          compiler: ${{ matrix.compiler }}
+          version: ${{ matrix.version }}
+
+      - name: Install dependencies
+        if: matrix.install != ''
+        uses: alandefreitas/cpp-actions/package-install@v1.9.0
+        with:
+          apt-get: ${{ matrix.install }}
+
+      - name: Install Boost.JSON with vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+          ./vcpkg/bootstrap-vcpkg.sh || ./vcpkg/bootstrap-vcpkg.bat
+          ./vcpkg/vcpkg install boost-json
+
+      - name: Resolved Matrix
+        id: rmatrix
+        run: |
+          set -euvx
+
+          common_cxxflags_base=""
+          if [[ "${{ matrix.use-libcxx }}" == 'true' ]]; then
+            common_cxxflags_base="-stdlib=libc++"
+          fi
+          echo "common-cxxflags-base=$common_cxxflags_base" >> $GITHUB_OUTPUT
+
+          common_cxxflags="$common_cxxflags_base ${{ matrix.cxxflags }} ${{ matrix.common-flags }}"
+          echo "common-cxxflags=$common_cxxflags" >> $GITHUB_OUTPUT
+
+          common_ldflags="${{ matrix.ldflags }}"
+          if [[ "${{ matrix.use-libcxx }}" == 'true' ]]; then
+            common_ldflags="$common_ldflags -stdlib=libc++"
+          fi
+          if [[ "${{ matrix.ubsan }}" == 'true' ]]; then
+            common_ldflags="$common_ldflags -fsanitize=undefined"
+          fi
+          if [[ "${{ matrix.asan }}" == 'true' ]]; then
+            common_ldflags="$common_ldflags -fsanitize=address"
+          fi
+          if [[ "${{ matrix.msan }}" == 'true' ]]; then
+            common_ldflags="$common_ldflags -fsanitize=memory"
+          fi
+          echo "common-ldflags=$common_ldflags" >> $GITHUB_OUTPUT
+
+      - name: Configure & build
+        uses: alandefreitas/cpp-actions/cmake-workflow@v1.9.0
+        with:
+          cmake-version: '>=3.26'
+          source-dir: .
+          build-dir: build
+          generator: Ninja
+          build-type: ${{ matrix.build-type }}
+          cxxstd: ${{ matrix.cxxstd }}
+          cc: ${{ steps.setup-cpp.outputs.cc }}
+          cxx: ${{ steps.setup-cpp.outputs.cxx }}
+          run-tests: true
+          install: false
+          trace-commands: true
+          extra-args: >
+            -D CMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
+            -D BOOST_HANDLEBARS_BUILD_TESTS=ON
+            -D CMAKE_C_COMPILER="${{ steps.setup-cpp.outputs.cc }}"
+            -D CMAKE_CXX_COMPILER="${{ steps.setup-cpp.outputs.cxx }}"
+            -D CMAKE_C_FLAGS="${{ steps.rmatrix.outputs.common-cxxflags }}"
+            -D CMAKE_CXX_FLAGS="${{ steps.rmatrix.outputs.common-cxxflags }}"
+            -D CMAKE_SHARED_LINKER_FLAGS="${{ steps.rmatrix.outputs.common-ldflags }}"
+            -D CMAKE_EXE_LINKER_FLAGS="${{ steps.rmatrix.outputs.common-ldflags }}"
+
+      - name: Upload artifacts
+        if: ${{ matrix.is-main }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: handlebars-${{ matrix.compiler }}
+          path: build
