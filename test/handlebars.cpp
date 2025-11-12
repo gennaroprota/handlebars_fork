@@ -499,12 +499,18 @@ setup_helpers()
         return dom::JSON::stringify(arg);
     });
 
-    master.hbs.registerHelper("bold", dom::makeVariadicInvocable([](
-        dom::Array const& args) {
-        dom::Value options = args.back();
-        return std::format(R"(<div class="mybold">{}</div>)",
-                           options.get("fn")());
-    }));
+    struct BoldHelper
+    {
+        auto operator()(dom::Array const & args) const
+        {
+            dom::Value options = args.back();
+            const std::string fmt = R"(<div class="mybold">{}</div>)";
+            const auto a = toString(options.get("fn")());
+            return std::vformat(fmt, std::make_format_args(a));
+        }
+    };
+
+    master.hbs.registerHelper("bold", dom::makeVariadicInvocable(BoldHelper{}));
 
     master.hbs.registerHelper("list", dom::makeVariadicInvocable([](
         dom::Array const& args) -> dom::Value {
@@ -679,14 +685,20 @@ master_test()
 void
 safe_string()
 {
-    Handlebars hbs;
-    hbs.registerHelper("bold", [](dom::Value str) -> dom::Value
+    struct BoldHelper
     {
-        if (!str) {
-            return "bold helper requires at least one argument";
+        auto operator()(dom::Value str) const -> dom::Value
+        {
+            if (!str) {
+                return "bold helper requires at least one argument";
+            }
+            auto args = toString(str);
+            return std::vformat("<b>{}</b>", std::make_format_args(args));
         }
-        return std::format("<b>{}</b>", str);
-    });
+    };
+
+    Handlebars hbs;
+    hbs.registerHelper("bold", BoldHelper{});
     std::string templ = "{{bold 'text'}}";
     std::string res = hbs.render(templ, {});
     BOOST_TEST_NOT(res == "<b>text</b>");
@@ -698,12 +710,19 @@ safe_string()
     BOOST_TEST(res == "<b>text</b>");
     BOOST_TEST_NOT(res == "&lt;b&gt;text&lt;/b&gt;");
 
-    hbs.registerHelper("bold", [](dom::Value str) {
-        if (!str) {
-            return safeString("bold helper requires at least one argument");
+    struct BoldHelper2
+    {
+        auto operator()(dom::Value str) const
+        {
+            if (!str) {
+                return safeString("bold helper requires at least one argument");
+            }
+            auto args = toString(str);
+            return safeString(std::vformat("<b>{}</b>", std::make_format_args(args)));
         }
-        return safeString(std::format("<b>{}</b>", str));
-    });
+    };
+
+    hbs.registerHelper("bold", BoldHelper2{});
     res = hbs.render(templ, {});
     BOOST_TEST(res == "<b>text</b>");
     BOOST_TEST_NOT(res == "&lt;b&gt;text&lt;/b&gt;");
