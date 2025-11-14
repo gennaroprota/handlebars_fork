@@ -33,7 +33,7 @@ jobs:
 
       - name: Generate test matrix
         id: cpp-matrix
-        uses: alandefreitas/cpp-actions/cpp-matrix@v1.9.0
+        uses: alandefreitas/cpp-actions/cpp-matrix@master
         with:
           compilers: |
             gcc >=15
@@ -88,14 +88,14 @@ jobs:
 
       - name: Setup C++
         id: setup-cpp
-        uses: alandefreitas/cpp-actions/setup-cpp@v1.9.0
+        uses: alandefreitas/cpp-actions/setup-cpp@master
         with:
           compiler: ${{ matrix.compiler }}
           version: ${{ matrix.version }}
 
       - name: Install dependencies
         if: matrix.install != ''
-        uses: alandefreitas/cpp-actions/package-install@v1.9.0
+        uses: alandefreitas/cpp-actions/package-install@master
         with:
           apt-get: ${{ matrix.install }}
 
@@ -135,7 +135,7 @@ jobs:
           echo "common-ldflags=$common_ldflags" >> $GITHUB_OUTPUT
 
       - name: Configure & build
-        uses: alandefreitas/cpp-actions/cmake-workflow@v1.9.0
+        uses: alandefreitas/cpp-actions/cmake-workflow@master
         with:
           cmake-version: '>=3.26'
           source-dir: .
