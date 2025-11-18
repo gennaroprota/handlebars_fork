@@ -719,13 +719,13 @@ stringify(
         Array::size_type n = arr.size();
         for(std::size_t i = 0; i < n; ++i)
         {
-            dom::Value value = arr.get(i);
-            if (value.isUndefined() || value.isFunction())
+            dom::Value v = arr.get(i);
+            if (v.isUndefined() || v.isFunction())
             {
                 continue;
             }
             dest.append(indent);
-            stringify(dest, value, indent, visited);
+            stringify(dest, v, indent, visited);
             if(i != n - 1)
             {
                 dest.push_back(',');

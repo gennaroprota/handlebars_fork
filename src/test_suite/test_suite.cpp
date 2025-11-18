@@ -487,7 +487,7 @@ int run(std::ostream& out)
 
 // Simple main used to produce standalone
 // executables that run unit tests.
-int unit_test_main(int argc, char const* const* argv)
+int unit_test_main(int /*argc*/, char const* const* /*argv*/)
 {
 #if 0
 #if defined(_MSC_VER) && !defined(__clang__)
